@@ -1,5 +1,11 @@
 mod tic_tac_toe;
 use tic_tac_toe::*;
+use plotters::prelude::*;
+use std::fs::create_dir_all;
+
+const NUM_GENERATIONS: usize = 20;
+const TRAIN_GAMES: usize = 1000;
+const EVAL_GAMES: usize = 100;
 
 fn play_game(p1: &mut NeuralPlayer, p2: &mut NeuralPlayer) -> i32 {
     let mut board = Board::new();
@@ -48,19 +54,62 @@ fn play_game(p1: &mut NeuralPlayer, p2: &mut NeuralPlayer) -> i32 {
 }
 
 fn main() {
-    let mut player1 = NeuralPlayer::new(0, 0.01);
-    let mut player2 = NeuralPlayer::new(1, 0.01);
+    create_dir_all("models").unwrap();
 
-    let mut stats = [0i32; 3]; // [p1 wins, p2 wins, draws]
+    let mut generations = Vec::new();
+    let base = NeuralPlayer::new(0, 0.01);
+    base.save("models/gen_0.bin").unwrap();
+    generations.push(base);
 
-    for _ in 0..1000 {
-        match play_game(&mut player1, &mut player2) {
-            1 => stats[0] += 1,
-            -1 => stats[1] += 1,
-            0 => stats[2] += 1,
-            _ => {}
+    for gen in 1..NUM_GENERATIONS {
+        let mut player = NeuralPlayer::new(gen as u64, 0.01);
+        let mut opponent = generations[gen - 1].clone();
+        opponent.lr = 0.0;
+        for _ in 0..TRAIN_GAMES {
+            play_game(&mut player, &mut opponent);
+        }
+        player.save(&format!("models/gen_{}.bin", gen)).unwrap();
+        generations.push(player);
+    }
+
+    let mut matrix = vec![vec![0f32; NUM_GENERATIONS]; NUM_GENERATIONS];
+    for i in 0..NUM_GENERATIONS {
+        for j in 0..NUM_GENERATIONS {
+            if i == j { continue; }
+            let mut p1 = generations[i].clone();
+            let mut p2 = generations[j].clone();
+            p1.lr = 0.0;
+            p2.lr = 0.0;
+            let mut score = 0i32;
+            for _ in 0..EVAL_GAMES {
+                score += play_game(&mut p1, &mut p2);
+            }
+            matrix[i][j] = score as f32 / EVAL_GAMES as f32;
         }
     }
 
-    println!("P1 wins: {} P2 wins: {} Draws: {}", stats[0], stats[1], stats[2]);
+    let root = BitMapBackend::new("generation_strength.png", (800, 800)).into_drawing_area();
+    root.fill(&WHITE).unwrap();
+    let mut chart = ChartBuilder::on(&root)
+        .caption("Generation Strength", ("sans-serif", 30))
+        .margin(20)
+        .set_all_label_area_size(40)
+        .build_cartesian_2d(0..NUM_GENERATIONS as i32, 0..NUM_GENERATIONS as i32)
+        .unwrap();
+
+    chart.configure_mesh().disable_mesh().draw().unwrap();
+
+    for i in 0..NUM_GENERATIONS {
+        for j in 0..NUM_GENERATIONS {
+            let val = matrix[i][j];
+            let hue = 240.0 - ((val + 1.0) / 2.0 * 240.0); // -1 -> blue, 1 -> red
+            let color = HSLColor((hue / 360.0) as f64, 1.0, 0.5);
+            chart
+                .draw_series(std::iter::once(Rectangle::new(
+                    [(i as i32, j as i32), (i as i32 + 1, j as i32 + 1)],
+                    ShapeStyle::from(&color).filled(),
+                )))
+                .unwrap();
+        }
+    }
 }
