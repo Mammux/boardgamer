@@ -2,10 +2,11 @@ mod tic_tac_toe;
 use tic_tac_toe::*;
 use plotters::prelude::*;
 use std::fs::create_dir_all;
+use rand::Rng;
 
 const NUM_GENERATIONS: usize = 20;
-const TRAIN_GAMES: usize = 5;
-const EVAL_GAMES: usize = 5;
+const TRAIN_GAMES: usize = 10000;
+const EVAL_GAMES: usize = 10;
 
 fn play_game(p1: &mut NeuralPlayer, p2: &mut NeuralPlayer) -> i32 {
     let mut board = Board::new();
@@ -60,14 +61,18 @@ fn main() {
     let mut player = NeuralPlayer::new(0, 0.01);
 
     for gen in 0..NUM_GENERATIONS {
-        // Save the current generation before further training
-        player.save(&format!("models/gen_{}.bin", gen)).unwrap();
+        // player.save(&format!("models/gen_{}.bin", gen)).unwrap();
         generations.push(player.clone());
 
-        // Train the model for the next generation using self-play
         if gen < NUM_GENERATIONS - 1 {
             for i in 0..TRAIN_GAMES {
-                let mut opponent = player.clone();
+                // Train against a random previous generation
+                let opponent_idx = if generations.len() > 1 {
+                    player.rng.gen_range(0..generations.len())
+                } else {
+                    0
+                };
+                let mut opponent = generations[opponent_idx].clone();
                 opponent.lr = 0.0;
                 if i % 2 == 0 {
                     play_game(&mut player, &mut opponent);
@@ -87,8 +92,12 @@ fn main() {
             p1.lr = 0.0;
             p2.lr = 0.0;
             let mut score = 0i32;
-            for _ in 0..EVAL_GAMES {
-                score += play_game(&mut p1, &mut p2);
+            for i in 0..EVAL_GAMES {
+                if i % 2 == 0 {
+                    score += play_game(&mut p1, &mut p2);
+                } else {
+                    score -= play_game(&mut p2, &mut p1);
+                }
             }
             matrix[i][j] = score as f32 / EVAL_GAMES as f32;
         }

@@ -71,16 +71,39 @@ pub fn board_to_state(board: &Board, perspective: i32) -> [f32; BOARD_SIZE] {
 
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
+const HIDDEN_SIZE: usize = 128;
+
 #[derive(Clone)]
 pub struct NeuralPlayer {
-    pub weights: [[f32; BOARD_SIZE]; BOARD_SIZE],
+    pub w1: [[f32; BOARD_SIZE]; HIDDEN_SIZE],   // input -> hidden
+    pub b1: [f32; HIDDEN_SIZE],
+    pub w2: [[f32; HIDDEN_SIZE]; BOARD_SIZE],   // hidden -> output
+    pub b2: [f32; BOARD_SIZE],
     pub lr: f32,
     pub rng: StdRng,
 }
 
 impl NeuralPlayer {
     pub fn new(seed: u64, lr: f32) -> Self {
-        Self { weights: [[0.0; BOARD_SIZE]; BOARD_SIZE], lr, rng: StdRng::seed_from_u64(seed) }
+        let mut rng = StdRng::seed_from_u64(seed);
+        let mut w1 = [[0.0; BOARD_SIZE]; HIDDEN_SIZE];
+        let mut b1 = [0.0; HIDDEN_SIZE];
+        let mut w2 = [[0.0; HIDDEN_SIZE]; BOARD_SIZE];
+        let mut b2 = [0.0; BOARD_SIZE];
+        // Small random init
+        for i in 0..HIDDEN_SIZE {
+            for j in 0..BOARD_SIZE {
+                w1[i][j] = (rng.gen::<f32>() - 0.5) * 0.2;
+            }
+            b1[i] = 0.0;
+        }
+        for i in 0..BOARD_SIZE {
+            for j in 0..HIDDEN_SIZE {
+                w2[i][j] = (rng.gen::<f32>() - 0.5) * 0.2;
+            }
+            b2[i] = 0.0;
+        }
+        Self { w1, b1, w2, b2, lr, rng }
     }
 
     pub fn select_action(&mut self, board: &Board, perspective: i32) -> usize {
@@ -121,38 +144,92 @@ impl NeuralPlayer {
     }
 
     fn forward(&self, state: &[f32; BOARD_SIZE]) -> [f32; BOARD_SIZE] {
+        // Input -> hidden
+        let mut hidden = [0f32; HIDDEN_SIZE];
+        for i in 0..HIDDEN_SIZE {
+            for j in 0..BOARD_SIZE {
+                hidden[i] += self.w1[i][j] * state[j];
+            }
+            hidden[i] += self.b1[i];
+            // ReLU
+            if hidden[i] < 0.0 { hidden[i] = 0.0; }
+        }
+        // Hidden -> output
         let mut out = [0f32; BOARD_SIZE];
         for i in 0..BOARD_SIZE {
-            for j in 0..BOARD_SIZE {
-                out[i] += self.weights[i][j] * state[j];
+            for j in 0..HIDDEN_SIZE {
+                out[i] += self.w2[i][j] * hidden[j];
             }
+            out[i] += self.b2[i];
         }
         out
     }
 
     pub fn train(&mut self, states: &[[f32; BOARD_SIZE]], actions: &[usize], reward: f32) {
         for (state, &action) in states.iter().zip(actions.iter()) {
-            let logits = self.forward(state);
-            let probs = softmax(&logits);
-            for i in 0..BOARD_SIZE {
-                let grad = (if i == action { 1.0 } else { 0.0 }) - probs[i];
+            // Forward
+            let mut hidden = [0f32; HIDDEN_SIZE];
+            let mut hidden_raw = [0f32; HIDDEN_SIZE];
+            for i in 0..HIDDEN_SIZE {
                 for j in 0..BOARD_SIZE {
-                    self.weights[i][j] += self.lr * reward * grad * state[j];
+                    hidden_raw[i] += self.w1[i][j] * state[j];
                 }
+                hidden_raw[i] += self.b1[i];
+                hidden[i] = hidden_raw[i].max(0.0); // ReLU
+            }
+            let logits = {
+                let mut out = [0f32; BOARD_SIZE];
+                for i in 0..BOARD_SIZE {
+                    for j in 0..HIDDEN_SIZE {
+                        out[i] += self.w2[i][j] * hidden[j];
+                    }
+                    out[i] += self.b2[i];
+                }
+                out
+            };
+            let probs = softmax(&logits);
+
+            // Output layer gradients
+            let mut dlogits = [0f32; BOARD_SIZE];
+            for i in 0..BOARD_SIZE {
+                dlogits[i] = (if i == action { 1.0 } else { 0.0 }) - probs[i];
+            }
+
+            // Gradients for w2, b2, and hidden
+            let mut dhidden = [0f32; HIDDEN_SIZE];
+            for i in 0..BOARD_SIZE {
+                for j in 0..HIDDEN_SIZE {
+                    self.w2[i][j] += self.lr * reward * dlogits[i] * hidden[j];
+                    dhidden[j] += self.w2[i][j] * dlogits[i];
+                }
+                self.b2[i] += self.lr * reward * dlogits[i];
+            }
+
+            // Gradients for w1, b1
+            for i in 0..HIDDEN_SIZE {
+                let grad = if hidden_raw[i] > 0.0 { dhidden[i] } else { 0.0 };
+                for j in 0..BOARD_SIZE {
+                    self.w1[i][j] += self.lr * reward * grad * state[j];
+                }
+                self.b1[i] += self.lr * reward * grad;
             }
         }
     }
 
+    /*
+    // Update save/load to include new weights
     pub fn save(&self, path: &str) -> std::io::Result<()> {
-        let data = bincode::serialize(&self.weights).unwrap();
+        let data = bincode::serialize(&(self.w1, self.b1, self.w2, self.b2)).unwrap();
         std::fs::write(path, data)
     }
 
     pub fn _load(path: &str, seed: u64, lr: f32) -> std::io::Result<Self> {
         let data = std::fs::read(path)?;
-        let weights: [[f32; BOARD_SIZE]; BOARD_SIZE] = bincode::deserialize(&data).unwrap();
-        Ok(Self { weights, lr, rng: StdRng::seed_from_u64(seed) })
+        let (w1, b1, w2, b2): ([[f32; BOARD_SIZE]; HIDDEN_SIZE], [f32; HIDDEN_SIZE], [[f32; HIDDEN_SIZE]; BOARD_SIZE], [f32; BOARD_SIZE]) =
+            bincode::deserialize(&data).unwrap();
+        Ok(Self { w1, b1, w2, b2, lr, rng: StdRng::seed_from_u64(seed) })
     }
+    */
 }
 
 fn softmax(logits: &[f32; BOARD_SIZE]) -> [f32; BOARD_SIZE] {
