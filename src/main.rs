@@ -57,19 +57,25 @@ fn main() {
     create_dir_all("models").unwrap();
 
     let mut generations = Vec::new();
-    let base = NeuralPlayer::new(0, 0.01);
-    base.save("models/gen_0.bin").unwrap();
-    generations.push(base);
+    let mut player = NeuralPlayer::new(0, 0.01);
 
-    for gen in 1..NUM_GENERATIONS {
-        let mut player = NeuralPlayer::new(gen as u64, 0.01);
-        let mut opponent = generations[gen - 1].clone();
-        opponent.lr = 0.0;
-        for _ in 0..TRAIN_GAMES {
-            play_game(&mut player, &mut opponent);
-        }
+    for gen in 0..NUM_GENERATIONS {
+        // Save the current generation before further training
         player.save(&format!("models/gen_{}.bin", gen)).unwrap();
-        generations.push(player);
+        generations.push(player.clone());
+
+        // Train the model for the next generation using self-play
+        if gen < NUM_GENERATIONS - 1 {
+            for i in 0..TRAIN_GAMES {
+                let mut opponent = player.clone();
+                opponent.lr = 0.0;
+                if i % 2 == 0 {
+                    play_game(&mut player, &mut opponent);
+                } else {
+                    play_game(&mut opponent, &mut player);
+                }
+            }
+        }
     }
 
     let mut matrix = vec![vec![0f32; NUM_GENERATIONS]; NUM_GENERATIONS];
