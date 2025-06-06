@@ -86,8 +86,38 @@ impl NeuralPlayer {
     pub fn select_action(&mut self, board: &Board, perspective: i32) -> usize {
         let state = board_to_state(board, perspective);
         let logits = self.forward(&state);
-        let probs = softmax(&logits);
-        sample_from_probs(&mut self.rng, &probs)
+        let mut probs = softmax(&logits);
+
+        // Mask out invalid moves so the player does not try placing a piece on
+        // an already occupied cell. This prevents the training from getting
+        // stuck in states where the network repeatedly selects illegal actions
+        // and ensures learning focuses on meaningful gameplay.
+        for i in 0..BOARD_SIZE {
+            if !board.is_valid_move(i) {
+                probs[i] = 0.0;
+            }
+        }
+
+        // Re-normalise the probabilities. If all moves are invalid (which
+        // should only happen once the board is full), fall back to choosing a
+        // random valid move.
+        let sum: f32 = probs.iter().sum();
+        if sum > 0.0 {
+            for p in probs.iter_mut() {
+                *p /= sum;
+            }
+            sample_from_probs(&mut self.rng, &probs)
+        } else {
+            let valid_moves: Vec<usize> = (0..BOARD_SIZE)
+                .filter(|&i| board.is_valid_move(i))
+                .collect();
+            if valid_moves.is_empty() {
+                0
+            } else {
+                let idx = self.rng.gen_range(0..valid_moves.len());
+                valid_moves[idx]
+            }
+        }
     }
 
     fn forward(&self, state: &[f32; BOARD_SIZE]) -> [f32; BOARD_SIZE] {
