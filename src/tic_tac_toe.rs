@@ -118,7 +118,7 @@ impl NeuralPlayer {
         std::fs::write(path, data)
     }
 
-    pub fn load(path: &str, seed: u64, lr: f32) -> std::io::Result<Self> {
+    pub fn _load(path: &str, seed: u64, lr: f32) -> std::io::Result<Self> {
         let data = std::fs::read(path)?;
         let weights: [[f32; BOARD_SIZE]; BOARD_SIZE] = bincode::deserialize(&data).unwrap();
         Ok(Self { weights, lr, rng: StdRng::seed_from_u64(seed) })

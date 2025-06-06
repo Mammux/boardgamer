@@ -4,8 +4,8 @@ use plotters::prelude::*;
 use std::fs::create_dir_all;
 
 const NUM_GENERATIONS: usize = 20;
-const TRAIN_GAMES: usize = 1000;
-const EVAL_GAMES: usize = 100;
+const TRAIN_GAMES: usize = 5;
+const EVAL_GAMES: usize = 5;
 
 fn play_game(p1: &mut NeuralPlayer, p2: &mut NeuralPlayer) -> i32 {
     let mut board = Board::new();
