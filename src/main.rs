@@ -5,8 +5,8 @@ use std::fs::create_dir_all;
 use std::env;
 
 
-const NUM_GENERATIONS: usize = 20;
-const TRAIN_GAMES: usize = 10000;
+const NUM_GENERATIONS: usize = 100;
+const TRAIN_GAMES: usize = 1000;
 const EVAL_GAMES: usize = 10;
 
 fn play_game(p1: &mut NeuralPlayer, p2: &mut NeuralPlayer) -> i32 {
@@ -106,7 +106,7 @@ fn play_game_log(player: &mut NeuralPlayer) {
 }
 
 fn main() {
-    create_dir_all("models").unwrap();
+    // create_dir_all("models").unwrap();
     let play_final = env::args().any(|a| a == "--final-game");
 
     let mut generations = Vec::new();
