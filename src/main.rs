@@ -2,6 +2,8 @@ mod tic_tac_toe;
 use tic_tac_toe::*;
 use plotters::prelude::*;
 use std::fs::create_dir_all;
+use std::env;
+
 
 const NUM_GENERATIONS: usize = 20;
 const TRAIN_GAMES: usize = 10000;
@@ -59,8 +61,53 @@ fn play_game(p1: &mut NeuralPlayer, p2: &mut NeuralPlayer) -> i32 {
     }
 }
 
+fn idx_to_coord(idx: usize) -> &'static str {
+    match idx {
+        0 => "a1",
+        1 => "b1",
+        2 => "c1",
+        3 => "a2",
+        4 => "b2",
+        5 => "c2",
+        6 => "a3",
+        7 => "b3",
+        8 => "c3",
+        _ => "?",
+    }
+}
+
+fn play_game_log(player: &mut NeuralPlayer) {
+    let mut board = Board::new();
+    let mut p1 = player.clone();
+    let mut p2 = player.clone();
+    p1.lr = 0.0;
+    p2.lr = 0.0;
+
+    loop {
+        let (act, symbol) = if board.player == 1 {
+            (p1.select_action(&board, 1), 'X')
+        } else {
+            (p2.select_action(&board, -1), 'O')
+        };
+        board.make_move(act);
+        println!("{} {}", symbol, idx_to_coord(act));
+        match board.check_winner() {
+            GameResult::Win(w) => {
+                println!("{} wins", if w == 1 { 'X' } else { 'O' });
+                break;
+            }
+            GameResult::Draw => {
+                println!("Draw");
+                break;
+            }
+            GameResult::Ongoing => {}
+        }
+    }
+}
+
 fn main() {
     create_dir_all("models").unwrap();
+    let play_final = env::args().any(|a| a == "--final-game");
 
     let mut generations = Vec::new();
     let mut player = NeuralPlayer::new(0, 0.01);
@@ -154,5 +201,11 @@ fn main() {
                 )))
                 .unwrap();
         }
+    }
+
+    if play_final {
+        println!("Final generation self-play:");
+        let mut last = generations.last().unwrap().clone();
+        play_game_log(&mut last);
     }
 }
