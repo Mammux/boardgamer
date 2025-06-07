@@ -2,7 +2,6 @@ mod tic_tac_toe;
 use tic_tac_toe::*;
 use plotters::prelude::*;
 use std::fs::create_dir_all;
-use rand::Rng;
 
 const NUM_GENERATIONS: usize = 20;
 const TRAIN_GAMES: usize = 10000;
@@ -71,14 +70,37 @@ fn main() {
         generations.push(player.clone());
 
         if gen < NUM_GENERATIONS - 1 {
+            // Determine the strongest previous generation by evaluating each
+            // against the current player. The one with the highest score over a
+            // small evaluation set is selected as the training opponent.
+            let strongest_idx = if generations.len() > 1 {
+                let mut best_idx = 0;
+                let mut best_score = i32::MIN;
+                for idx in 0..generations.len() - 1 {
+                    let mut opp = generations[idx].clone();
+                    let mut me = player.clone();
+                    opp.lr = 0.0;
+                    me.lr = 0.0;
+                    let mut score = 0i32;
+                    for g in 0..EVAL_GAMES {
+                        if g % 2 == 0 {
+                            score += play_game(&mut opp, &mut me);
+                        } else {
+                            score -= play_game(&mut me, &mut opp);
+                        }
+                    }
+                    if score > best_score {
+                        best_score = score;
+                        best_idx = idx;
+                    }
+                }
+                best_idx
+            } else {
+                0
+            };
+
             for i in 0..TRAIN_GAMES {
-                // Train against a random previous generation
-                let opponent_idx = if generations.len() > 1 {
-                    player.rng.gen_range(0..generations.len())
-                } else {
-                    0
-                };
-                let mut opponent = generations[opponent_idx].clone();
+                let mut opponent = generations[strongest_idx].clone();
                 opponent.lr = 0.0;
                 if i % 2 == 0 {
                     play_game(&mut player, &mut opponent);
