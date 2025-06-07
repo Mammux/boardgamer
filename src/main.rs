@@ -17,9 +17,14 @@ fn play_game(p1: &mut NeuralPlayer, p2: &mut NeuralPlayer) -> i32 {
 
     loop {
         // Player 1 turn
+        // Capture the board state before making a move so the network learns
+        // which action to take given the current situation. Previously the
+        // state was recorded after the move, causing the network to learn to
+        // repeat moves on already occupied cells.
+        let state = board_to_state(&board, 1);
         let action = p1.select_action(&board, 1);
         board.make_move(action);
-        states_p1.push(board_to_state(&board, 1));
+        states_p1.push(state);
         actions_p1.push(action);
         match board.check_winner() {
             GameResult::Win(w) => {
@@ -35,9 +40,10 @@ fn play_game(p1: &mut NeuralPlayer, p2: &mut NeuralPlayer) -> i32 {
         }
 
         // Player 2 turn
+        let state = board_to_state(&board, -1);
         let action = p2.select_action(&board, -1);
         board.make_move(action);
-        states_p2.push(board_to_state(&board, -1));
+        states_p2.push(state);
         actions_p2.push(action);
         match board.check_winner() {
             GameResult::Win(w) => {

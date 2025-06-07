@@ -254,3 +254,45 @@ fn sample_from_probs(rng: &mut StdRng, probs: &[f32; BOARD_SIZE]) -> usize {
     }
     BOARD_SIZE - 1
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_make_move_and_player_switch() {
+        let mut board = Board::new();
+        assert!(board.make_move(0));
+        // player should switch from 1 to -1
+        assert_eq!(board.player, -1);
+        // cell updated
+        assert_eq!(board.cells[0], 1);
+        // cannot move to same cell again
+        assert!(!board.make_move(0));
+    }
+
+    #[test]
+    fn test_board_to_state_perspective() {
+        let mut board = Board::new();
+        board.make_move(0); // player 1 moves
+        board.make_move(1); // player -1 moves
+        let state_p1 = board_to_state(&board, 1);
+        let state_p2 = board_to_state(&board, -1);
+        // board cells: [1, -1, 0, ...]
+        assert_eq!(state_p1[0], 1.0);
+        assert_eq!(state_p1[1], -1.0);
+        assert_eq!(state_p2[0], -1.0); // from opponent perspective
+        assert_eq!(state_p2[1], 1.0);
+    }
+
+    #[test]
+    fn test_select_action_returns_valid_move() {
+        let mut player = NeuralPlayer::new(0, 0.0);
+        let mut board = Board::new();
+        board.make_move(0); // occupy cell 0
+        for _ in 0..10 {
+            let action = player.select_action(&board, 1);
+            assert!(board.is_valid_move(action));
+        }
+    }
+}
