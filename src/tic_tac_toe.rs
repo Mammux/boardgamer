@@ -254,3 +254,167 @@ fn sample_from_probs(rng: &mut StdRng, probs: &[f32; BOARD_SIZE]) -> usize {
     }
     BOARD_SIZE - 1
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_make_move_and_player_switch() {
+        let mut board = Board::new();
+        assert!(board.make_move(0));
+        // player should switch from 1 to -1
+        assert_eq!(board.player, -1);
+        // cell updated
+        assert_eq!(board.cells[0], 1);
+        // cannot move to same cell again
+        assert!(!board.make_move(0));
+    }
+
+    #[test]
+    fn test_board_to_state_perspective() {
+        let mut board = Board::new();
+        board.make_move(0); // player 1 moves
+        board.make_move(1); // player -1 moves
+        let state_p1 = board_to_state(&board, 1);
+        let state_p2 = board_to_state(&board, -1);
+        // board cells: [1, -1, 0, ...]
+        assert_eq!(state_p1[0], 1.0);
+        assert_eq!(state_p1[1], -1.0);
+        assert_eq!(state_p2[0], -1.0); // from opponent perspective
+        assert_eq!(state_p2[1], 1.0);
+    }
+
+    #[test]
+    fn test_select_action_returns_valid_move() {
+        let mut player = NeuralPlayer::new(0, 0.0);
+        let mut board = Board::new();
+        board.make_move(0); // occupy cell 0
+        for _ in 0..10 {
+            let action = player.select_action(&board, 1);
+            assert!(board.is_valid_move(action));
+        }
+    }
+
+    fn play_game_train(p1: &mut NeuralPlayer, p2: &mut NeuralPlayer) -> i32 {
+        let mut board = Board::new();
+        let mut states_p1 = Vec::new();
+        let mut actions_p1 = Vec::new();
+        let mut states_p2 = Vec::new();
+        let mut actions_p2 = Vec::new();
+
+        loop {
+            let state = board_to_state(&board, 1);
+            let action = p1.select_action(&board, 1);
+            board.make_move(action);
+            states_p1.push(state);
+            actions_p1.push(action);
+            match board.check_winner() {
+                GameResult::Win(w) => {
+                    if w == 1 {
+                        p1.train(&states_p1, &actions_p1, 1.0);
+                        p2.train(&states_p2, &actions_p2, -1.0);
+                        return 1;
+                    } else {
+                        p1.train(&states_p1, &actions_p1, -1.0);
+                        p2.train(&states_p2, &actions_p2, 1.0);
+                        return -1;
+                    }
+                }
+                GameResult::Draw => {
+                    p1.train(&states_p1, &actions_p1, 0.0);
+                    p2.train(&states_p2, &actions_p2, 0.0);
+                    return 0;
+                }
+                GameResult::Ongoing => {}
+            }
+
+            let state = board_to_state(&board, -1);
+            let action = p2.select_action(&board, -1);
+            board.make_move(action);
+            states_p2.push(state);
+            actions_p2.push(action);
+            match board.check_winner() {
+                GameResult::Win(w) => {
+                    if w == 1 {
+                        p1.train(&states_p1, &actions_p1, 1.0);
+                        p2.train(&states_p2, &actions_p2, -1.0);
+                        return 1;
+                    } else {
+                        p1.train(&states_p1, &actions_p1, -1.0);
+                        p2.train(&states_p2, &actions_p2, 1.0);
+                        return -1;
+                    }
+                }
+                GameResult::Draw => {
+                    p1.train(&states_p1, &actions_p1, 0.0);
+                    p2.train(&states_p2, &actions_p2, 0.0);
+                    return 0;
+                }
+                GameResult::Ongoing => {}
+            }
+        }
+    }
+
+    fn play_game_eval(p1: &mut NeuralPlayer, p2: &mut NeuralPlayer) -> i32 {
+        let mut board = Board::new();
+        loop {
+            let action = p1.select_action(&board, 1);
+            board.make_move(action);
+            match board.check_winner() {
+                GameResult::Win(w) => return if w == 1 { 1 } else { -1 },
+                GameResult::Draw => return 0,
+                GameResult::Ongoing => {}
+            }
+
+            let action = p2.select_action(&board, -1);
+            board.make_move(action);
+            match board.check_winner() {
+                GameResult::Win(w) => return if w == 1 { 1 } else { -1 },
+                GameResult::Draw => return 0,
+                GameResult::Ongoing => {}
+            }
+        }
+    }
+
+    #[test]
+    fn test_trained_model_beats_random() {
+        let mut trained = NeuralPlayer::new(0, 0.01);
+        let mut opponent = NeuralPlayer::new(1, 0.0);
+
+        // Train the model for a modest number of games
+        for i in 0..200 {
+            if i % 2 == 0 {
+                play_game_train(&mut trained, &mut opponent);
+            } else {
+                play_game_train(&mut opponent, &mut trained);
+            }
+        }
+
+        let mut trained_eval = trained.clone();
+        trained_eval.lr = 0.0;
+        let mut random_eval = NeuralPlayer::new(2, 0.0);
+
+        let mut score_trained = 0i32;
+        for i in 0..100 {
+            if i % 2 == 0 {
+                score_trained += play_game_eval(&mut trained_eval, &mut random_eval);
+            } else {
+                score_trained -= play_game_eval(&mut random_eval, &mut trained_eval);
+            }
+        }
+
+        let mut baseline_p1 = NeuralPlayer::new(3, 0.0);
+        let mut baseline_p2 = NeuralPlayer::new(4, 0.0);
+        let mut score_baseline = 0i32;
+        for i in 0..100 {
+            if i % 2 == 0 {
+                score_baseline += play_game_eval(&mut baseline_p1, &mut baseline_p2);
+            } else {
+                score_baseline -= play_game_eval(&mut baseline_p2, &mut baseline_p1);
+            }
+        }
+
+        assert!(score_trained > score_baseline, "trained: {}, baseline: {}", score_trained, score_baseline);
+    }
+}
