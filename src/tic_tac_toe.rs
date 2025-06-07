@@ -166,7 +166,13 @@ impl NeuralPlayer {
     }
 
     pub fn train(&mut self, states: &[[f32; BOARD_SIZE]], actions: &[usize], reward: f32) {
-        for (state, &action) in states.iter().zip(actions.iter()) {
+        // Earlier decisions should contribute slightly less to the update than
+        // moves closer to the end of the game. Apply a simple discounted
+        // return where later states receive larger gradients.
+        const DISCOUNT: f32 = 0.9;
+        let n = states.len();
+        for (idx, (state, &action)) in states.iter().zip(actions.iter()).enumerate() {
+            let disc = DISCOUNT.powi((n - idx - 1) as i32);
             // Forward
             let mut hidden = [0f32; HIDDEN_SIZE];
             let mut hidden_raw = [0f32; HIDDEN_SIZE];
@@ -199,19 +205,19 @@ impl NeuralPlayer {
             let mut dhidden = [0f32; HIDDEN_SIZE];
             for i in 0..BOARD_SIZE {
                 for j in 0..HIDDEN_SIZE {
-                    self.w2[i][j] += self.lr * reward * dlogits[i] * hidden[j];
+                    self.w2[i][j] += self.lr * reward * disc * dlogits[i] * hidden[j];
                     dhidden[j] += self.w2[i][j] * dlogits[i];
                 }
-                self.b2[i] += self.lr * reward * dlogits[i];
+                self.b2[i] += self.lr * reward * disc * dlogits[i];
             }
 
             // Gradients for w1, b1
             for i in 0..HIDDEN_SIZE {
                 let grad = if hidden_raw[i] > 0.0 { dhidden[i] } else { 0.0 };
                 for j in 0..BOARD_SIZE {
-                    self.w1[i][j] += self.lr * reward * grad * state[j];
+                    self.w1[i][j] += self.lr * reward * disc * grad * state[j];
                 }
-                self.b1[i] += self.lr * reward * grad;
+                self.b1[i] += self.lr * reward * disc * grad;
             }
         }
     }
