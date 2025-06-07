@@ -4,6 +4,7 @@ use plotters::prelude::*;
 use std::fs::create_dir_all;
 use std::env;
 
+
 const NUM_GENERATIONS: usize = 20;
 const TRAIN_GAMES: usize = 10000;
 const EVAL_GAMES: usize = 10;
