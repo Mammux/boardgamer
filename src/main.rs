@@ -2,7 +2,7 @@ mod tic_tac_toe;
 use tic_tac_toe::*;
 use plotters::prelude::*;
 use std::fs::create_dir_all;
-use rand::Rng;
+use std::env;
 
 const NUM_GENERATIONS: usize = 20;
 const TRAIN_GAMES: usize = 10000;
@@ -17,9 +17,14 @@ fn play_game(p1: &mut NeuralPlayer, p2: &mut NeuralPlayer) -> i32 {
 
     loop {
         // Player 1 turn
+        // Capture the board state before making a move so the network learns
+        // which action to take given the current situation. Previously the
+        // state was recorded after the move, causing the network to learn to
+        // repeat moves on already occupied cells.
+        let state = board_to_state(&board, 1);
         let action = p1.select_action(&board, 1);
         board.make_move(action);
-        states_p1.push(board_to_state(&board, 1));
+        states_p1.push(state);
         actions_p1.push(action);
         match board.check_winner() {
             GameResult::Win(w) => {
@@ -35,9 +40,10 @@ fn play_game(p1: &mut NeuralPlayer, p2: &mut NeuralPlayer) -> i32 {
         }
 
         // Player 2 turn
+        let state = board_to_state(&board, -1);
         let action = p2.select_action(&board, -1);
         board.make_move(action);
-        states_p2.push(board_to_state(&board, -1));
+        states_p2.push(state);
         actions_p2.push(action);
         match board.check_winner() {
             GameResult::Win(w) => {
@@ -54,8 +60,53 @@ fn play_game(p1: &mut NeuralPlayer, p2: &mut NeuralPlayer) -> i32 {
     }
 }
 
+fn idx_to_coord(idx: usize) -> &'static str {
+    match idx {
+        0 => "a1",
+        1 => "b1",
+        2 => "c1",
+        3 => "a2",
+        4 => "b2",
+        5 => "c2",
+        6 => "a3",
+        7 => "b3",
+        8 => "c3",
+        _ => "?",
+    }
+}
+
+fn play_game_log(player: &mut NeuralPlayer) {
+    let mut board = Board::new();
+    let mut p1 = player.clone();
+    let mut p2 = player.clone();
+    p1.lr = 0.0;
+    p2.lr = 0.0;
+
+    loop {
+        let (act, symbol) = if board.player == 1 {
+            (p1.select_action(&board, 1), 'X')
+        } else {
+            (p2.select_action(&board, -1), 'O')
+        };
+        board.make_move(act);
+        println!("{} {}", symbol, idx_to_coord(act));
+        match board.check_winner() {
+            GameResult::Win(w) => {
+                println!("{} wins", if w == 1 { 'X' } else { 'O' });
+                break;
+            }
+            GameResult::Draw => {
+                println!("Draw");
+                break;
+            }
+            GameResult::Ongoing => {}
+        }
+    }
+}
+
 fn main() {
     create_dir_all("models").unwrap();
+    let play_final = env::args().any(|a| a == "--final-game");
 
     let mut generations = Vec::new();
     let mut player = NeuralPlayer::new(0, 0.01);
@@ -65,14 +116,37 @@ fn main() {
         generations.push(player.clone());
 
         if gen < NUM_GENERATIONS - 1 {
+            // Determine the strongest previous generation by evaluating each
+            // against the current player. The one with the highest score over a
+            // small evaluation set is selected as the training opponent.
+            let strongest_idx = if generations.len() > 1 {
+                let mut best_idx = 0;
+                let mut best_score = i32::MIN;
+                for idx in 0..generations.len() - 1 {
+                    let mut opp = generations[idx].clone();
+                    let mut me = player.clone();
+                    opp.lr = 0.0;
+                    me.lr = 0.0;
+                    let mut score = 0i32;
+                    for g in 0..EVAL_GAMES {
+                        if g % 2 == 0 {
+                            score += play_game(&mut opp, &mut me);
+                        } else {
+                            score -= play_game(&mut me, &mut opp);
+                        }
+                    }
+                    if score > best_score {
+                        best_score = score;
+                        best_idx = idx;
+                    }
+                }
+                best_idx
+            } else {
+                0
+            };
+
             for i in 0..TRAIN_GAMES {
-                // Train against a random previous generation
-                let opponent_idx = if generations.len() > 1 {
-                    player.rng.gen_range(0..generations.len())
-                } else {
-                    0
-                };
-                let mut opponent = generations[opponent_idx].clone();
+                let mut opponent = generations[strongest_idx].clone();
                 opponent.lr = 0.0;
                 if i % 2 == 0 {
                     play_game(&mut player, &mut opponent);
@@ -126,5 +200,11 @@ fn main() {
                 )))
                 .unwrap();
         }
+    }
+
+    if play_final {
+        println!("Final generation self-play:");
+        let mut last = generations.last().unwrap().clone();
+        play_game_log(&mut last);
     }
 }
