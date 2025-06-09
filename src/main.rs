@@ -1,14 +1,20 @@
 mod tic_tac_toe;
 use tic_tac_toe::*;
 use plotters::prelude::*;
-use std::fs::create_dir_all;
 use std::env;
+
+// This program trains a neural tic-tac-toe player through repeated self-play.
+// After each generation of training the new player is evaluated against the
+// strongest earlier generation and the results are visualised as a heatmap.
 
 
 const NUM_GENERATIONS: usize = 100;
 const TRAIN_GAMES: usize = 1000;
 const EVAL_GAMES: usize = 10;
 
+/// Play a single self-play game between two networks and train them according
+/// to the final outcome. The return value is the score from the perspective of
+/// `p1` (1 = win, -1 = loss, 0 = draw).
 fn play_game(p1: &mut NeuralPlayer, p2: &mut NeuralPlayer) -> i32 {
     let mut board = Board::new();
     let mut states_p1 = Vec::new();
@@ -76,6 +82,8 @@ fn idx_to_coord(idx: usize) -> &'static str {
     }
 }
 
+/// Run a single game between two copies of the provided player and print each
+/// move to stdout. Useful for observing how a trained model behaves.
 fn play_game_log(player: &mut NeuralPlayer) {
     let mut board = Board::new();
     let mut p1 = player.clone();
@@ -105,8 +113,9 @@ fn play_game_log(player: &mut NeuralPlayer) {
     }
 }
 
+/// Train the network over multiple generations and optionally play out a
+/// demonstration game with the final model when `--final-game` is passed.
 fn main() {
-    // create_dir_all("models").unwrap();
     let play_final = env::args().any(|a| a == "--final-game");
 
     let mut generations = Vec::new();
@@ -120,6 +129,8 @@ fn main() {
             // Determine the strongest previous generation by evaluating each
             // against the current player. The one with the highest score over a
             // small evaluation set is selected as the training opponent.
+            // Evaluate previous generations and pick the best one as the
+            // opponent for further training.
             let strongest_idx = if generations.len() > 1 {
                 let mut best_idx = 0;
                 let mut best_score = i32::MIN;
@@ -146,6 +157,7 @@ fn main() {
                 0
             };
 
+            // Train against the selected opponent for a number of games.
             for i in 0..TRAIN_GAMES {
                 let mut opponent = generations[strongest_idx].clone();
                 opponent.lr = 0.0;
@@ -158,6 +170,7 @@ fn main() {
         }
     }
 
+    // Build a matrix of win rates between all generations for visualisation.
     let mut matrix = vec![vec![0f32; NUM_GENERATIONS]; NUM_GENERATIONS];
     for i in 0..NUM_GENERATIONS {
         for j in 0..NUM_GENERATIONS {
@@ -167,8 +180,8 @@ fn main() {
             p1.lr = 0.0;
             p2.lr = 0.0;
             let mut score = 0i32;
-            for i in 0..EVAL_GAMES {
-                if i % 2 == 0 {
+            for g in 0..EVAL_GAMES {
+                if g % 2 == 0 {
                     score += play_game(&mut p1, &mut p2);
                 } else {
                     score -= play_game(&mut p2, &mut p1);
